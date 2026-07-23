@@ -39,24 +39,40 @@ def get_pexels_video(query):
             return res['videos'][0]['video_files'][0]['link']
     except: return None
 
+# Helper function to ensure relevant visual matching from text
+def extract_visual_keyword(text, fallback_keyword):
+    if fallback_keyword and fallback_keyword.lower() != 'business':
+        return fallback_keyword
+    
+    # Extract meaningful English noun keywords if scene keyword is plain/default
+    clean_words = re.sub(r'[^a-zA-Z\s]', '', text).split()
+    ignore_words = {'the', 'and', 'a', 'to', 'of', 'in', 'is', 'that', 'for', 'it', 'as', 'was', 'with', 'on', 'at', 'by', 'this', 'an', 'be', 'are', 'from', 'or', 'have', 'has', 'had', 'not', 'but', 'what', 'all', 'were', 'when', 'we', 'there', 'can', 'an'}
+    filtered = [w for w in clean_words if w.lower() not in ignore_words and len(w) > 3]
+    
+    return filtered[0] if filtered else 'business corporate'
+
 # ==========================================
 # Process Each Scene (Business Case Study Engine)
 # ==========================================
 for i, scene in enumerate(scenes_data):
-    keyword = scene.get('keyword', 'business').strip()
-    image_prompt = scene.get('image_prompt', keyword).strip()
     text_line = scene.get('text', ' ').strip() or " "
+    raw_keyword = scene.get('keyword', '').strip()
+    
+    # Smart keyword selection to guarantee visuals strictly match scene context
+    keyword = extract_visual_keyword(text_line, raw_keyword)
+    image_prompt = scene.get('image_prompt', keyword).strip()
 
-    # --- 1. Audio Pipeline (MadhurNeural + Deep Audio Filter) ---
+    # --- 1. Audio Pipeline (US English Voice: ChristopherNeural + Audio Filters) ---
     raw_audio_path = f"raw_audio_{i}.mp3"
     norm_audio_path = f"audio_{i}.wav"
-    subprocess.run(['edge-tts', '--voice', 'hi-IN-MadhurNeural', '--text', text_line, '--write-media', raw_audio_path])
+    
+    # Voice updated to US English Christopher (Natural Business Documentary Voice)
+    subprocess.run(['edge-tts', '--voice', 'en-US-ChristopherNeural', '--text', text_line, '--write-media', raw_audio_path])
 
     if os.path.exists(raw_audio_path):
         audio_filter = "silenceremove=stop_periods=-1:stop_duration=0.3:stop_threshold=-35dB,bass=g=5:f=110,treble=g=3:f=8000"
         subprocess.run(['ffmpeg', '-y', '-i', raw_audio_path, '-af', audio_filter, '-ar', '44100', '-ac', '2', norm_audio_path], check=True)
         out = subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', norm_audio_path])
-        # FIXED: Removed the '+ 0.2' desync issue so video perfectly matches audio length
         scene_duration = float(out.decode('utf-8').strip()) 
     else:
         scene_duration = 3.0
@@ -124,7 +140,7 @@ for i, scene in enumerate(scenes_data):
     
     video_files.append(os.path.abspath(norm_video_path))
     gc.collect()
-    print(f"Scene {i+1} Ready: {keyword}")
+    print(f"Scene {i+1} Ready | Keyword: {keyword}")
 
 # ==========================================
 # DISK CONCATENATION (Merging Safely)
@@ -150,7 +166,6 @@ inputs = 2
 
 if has_bgm:
     ffmpeg_cmd.extend(['-stream_loop', '-1', '-i', 'bgm.mp3'])
-    # BGM volume changed to 0.45 here as requested
     filter_complex += "[1:a]asplit=2[voice_main][voice_control]; [2:a]volume=0.45[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
     inputs += 1
@@ -158,7 +173,7 @@ else:
     filter_complex += "[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
 
-# UPDATE: Channel Name changed to Business Decode
+# Channel Name for Watermark
 channel_name = "Business Decode"
 filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=H-th-50[v_graded]; "
 current_v_map = "[v_graded]"
@@ -189,7 +204,6 @@ print("\n🚀 Uploading Video directly to GitHub Releases...")
 
 run_id = os.environ.get('GITHUB_RUN_ID', str(int(time.time())))
 tag_name = f"vid-{run_id}"
-# UPDATE: Default repo name changed to new channel repo
 repo_name = os.environ.get('GITHUB_REPOSITORY', "castleapp2026/Business-Decode-Long") 
 
 try:
