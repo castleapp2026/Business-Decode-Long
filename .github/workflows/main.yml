@@ -1,4 +1,4 @@
-name: Auto Render Hindi Facts Video
+name: Auto Render Business Decode Video
 
 on:
   repository_dispatch:
