@@ -60,7 +60,6 @@ for i, scene in enumerate(scenes_data):
     
     # Smart keyword selection to guarantee visuals strictly match scene context
     keyword = extract_visual_keyword(text_line, raw_keyword)
-    image_prompt = scene.get('image_prompt', keyword).strip()
 
     # --- 1. Audio Pipeline (US English Voice: ChristopherNeural + Audio Filters) ---
     raw_audio_path = f"raw_audio_{i}.mp3"
@@ -86,8 +85,14 @@ for i, scene in enumerate(scenes_data):
 
     audio_files.append(os.path.abspath(final_audio_path))
 
-    # --- 2. Smart Visual Fetching (Pexels + AI Image Fallback) ---
+    # --- 2. Smart Visual Fetching (STRICTLY PEXELS VIDEOS ONLY) ---
     video_url = get_pexels_video(keyword)
+    
+    # Force fallback to a generic business video if the specific keyword fails
+    if not video_url:
+        print(f"⚠️ No video found for '{keyword}', retrying with 'business corporate'")
+        video_url = get_pexels_video('business corporate')
+
     norm_video_path = f"video_{i}.mp4"
     raw_media_path = f"raw_media_{i}.mp4"
     
@@ -99,14 +104,7 @@ for i, scene in enumerate(scenes_data):
             vclip = vclip.fx(vfx.loop, duration=scene_duration) if vclip.duration < scene_duration else vclip.subclip(0, scene_duration)
             last_successful_media = {"type": "video", "path": raw_media_path}
         else:
-            print(f"⚠️ Generating AI Image for '{image_prompt}'")
-            raw_media_path = f"raw_media_{i}.jpg"
-            ai_prompt_encoded = urllib.parse.quote(f"Epic cinematic concept art, {image_prompt}, highly detailed, 8k resolution, Unreal Engine 5 render, dramatic contrast, pure textless photograph, no typography")
-            req = requests.get(f"https://image.pollinations.ai/prompt/{ai_prompt_encoded}?width=1920&height=1080&nologo=true", timeout=45)
-            img = Image.open(io.BytesIO(req.content)).convert("RGB")
-            img.save(raw_media_path, "JPEG")
-            vclip = ImageClip(raw_media_path).set_duration(scene_duration)
-            last_successful_media = {"type": "image", "path": raw_media_path}
+            raise Exception("No video found on Pexels even with fallback keyword.")
 
         vclip = vclip.resize(height=TARGET_H) if (vclip.w / vclip.h) > (TARGET_W / TARGET_H) else vclip.resize(width=TARGET_W)
         vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
