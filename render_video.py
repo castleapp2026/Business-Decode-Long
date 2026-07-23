@@ -15,7 +15,7 @@ urllib3_cn.allowed_gai_family = allowed_gai_family
 chat_id = os.environ.get('CHAT_ID')
 pexels_key = os.environ.get('PEXELS_API_KEY')
 scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
-bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8798779179:AAH53t28qW6g7QTsB8nGCEswNJz2DXR9ssU')
+bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8970872207:AAEJOu4z1-9d6bziOKq3Q9d-mk0ZIhkevX4')
 video_title = os.environ.get('TITLE', 'Business Case Study')
 thumbnail_prompt = os.environ.get('THUMBNAIL_PROMPT', 'Cinematic business thumbnail')
 video_desc = os.environ.get('DESCRIPTION', 'Business case study video.')
@@ -158,7 +158,8 @@ else:
     filter_complex += "[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
 
-channel_name = "Business Case Studies"
+# UPDATE: Channel Name changed to Business Decode
+channel_name = "Business Decode"
 filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=H-th-50[v_graded]; "
 current_v_map = "[v_graded]"
 
@@ -188,7 +189,8 @@ print("\n🚀 Uploading Video directly to GitHub Releases...")
 
 run_id = os.environ.get('GITHUB_RUN_ID', str(int(time.time())))
 tag_name = f"vid-{run_id}"
-repo_name = os.environ.get('GITHUB_REPOSITORY', "amu8085-lab/my-project1") 
+# UPDATE: Default repo name changed to new channel repo
+repo_name = os.environ.get('GITHUB_REPOSITORY', "castleapp2026/Business-Decode-Long") 
 
 try:
     cmd = ['gh', 'release', 'create', tag_name, 'final_video.mp4', '--repo', repo_name, '--notes', 'Automated Video Render']
