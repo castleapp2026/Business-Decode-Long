@@ -128,8 +128,11 @@ for i, scene in enumerate(scenes_data):
         if last_successful_media and os.path.exists(last_successful_media["path"]):
             fallback_clip = VideoFileClip(last_successful_media["path"]).fx(vfx.loop, duration=scene_duration) if last_successful_media["type"] == "video" else ImageClip(last_successful_media["path"]).set_duration(scene_duration)
             fallback_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H)
-            # Replaced dynamic lambda scaling on fallback with safe static scaling to prevent Pillow frame-buffer crashes
-            z_clip = fallback_clip.resize(1.02).set_position(('center', 'center'))
+            
+            # Replaced float percentage with strict integer sizes to ensure Pillow doesn't crash on fractional pixels
+            zoom_w, zoom_h = int(TARGET_W * 1.02), int(TARGET_H * 1.02)
+            z_clip = fallback_clip.resize(newsize=(zoom_w, zoom_h)).set_position(('center', 'center'))
+            
             final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
             final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
             fallback_clip.close()
