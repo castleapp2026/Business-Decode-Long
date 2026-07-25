@@ -15,7 +15,11 @@ urllib3_cn.allowed_gai_family = allowed_gai_family
 chat_id = os.environ.get('CHAT_ID')
 pexels_key = os.environ.get('PEXELS_API_KEY')
 scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
-bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8970872207:AAEJOu4z1-9d6bziOKq3Q9d-mk0ZIhkevX4')
+
+# 🚨 SECURITY FIX: Removed the hardcoded plaintext token. 
+# Make sure TELEGRAM_BOT_TOKEN is added to your GitHub Repository Secrets!
+bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+
 video_title = os.environ.get('TITLE', 'Business Case Study')
 thumbnail_prompt = os.environ.get('THUMBNAIL_PROMPT', 'Cinematic business thumbnail')
 video_desc = os.environ.get('DESCRIPTION', 'Business case study video.')
@@ -235,8 +239,11 @@ if not video_link:
 safe_description = str(video_desc).replace('\n', '  ')
 safe_title = str(video_title).replace('|', '')
 
+# 🚨 SECURITY FIX: Added check to prevent crash if bot_token is missing
 if not chat_id or chat_id == "None":
     print("❌ Error: CHAT_ID is missing. Cannot send Telegram message.")
+elif not bot_token:
+    print("❌ Error: TELEGRAM_BOT_TOKEN is missing. Please add it to your GitHub Secrets. Cannot send Telegram message.")
 else:
     message_text = f"READY_TO_UPLOAD|{video_link}|{safe_title}|{thumbnail_prompt}|{safe_description}"
     if len(message_text) > 4000: message_text = message_text[:3990] + "...[TRUNC]"
