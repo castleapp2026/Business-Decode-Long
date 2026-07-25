@@ -16,8 +16,10 @@ chat_id = os.environ.get('CHAT_ID')
 pexels_key = os.environ.get('PEXELS_API_KEY')
 scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
 
-# Wapas apka hardcoded token daal diya hai
-bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8970872207:AAEJOu4z1-9d6bziOKq3Q9d-mk0ZIhkevX4')
+# 👇 YAHAN FIX KIYA GAYA HAI: Agar token empty aata hai, toh yeh hardcoded token use karega
+bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+if not bot_token or bot_token.strip() == "":
+    bot_token = '8970872207:AAEJOu4z1-9d6bziOKq3Q9d-mk0ZIhkevX4'
 
 video_title = os.environ.get('TITLE', 'Business Case Study')
 thumbnail_prompt = os.environ.get('THUMBNAIL_PROMPT', 'Cinematic business thumbnail')
@@ -32,7 +34,6 @@ print(f"Total Scenes to render: {len(scenes_data)}")
 
 def get_pexels_video(query):
     try:
-        # Increased delay to 3 seconds to protect against rate limits and 429 errors
         time.sleep(3.0)
         res = requests.get(f"https://api.pexels.com/videos/search?query={query}&per_page=15&orientation=landscape", headers={"Authorization": pexels_key}, timeout=15).json()
         if 'error' in res:
@@ -131,7 +132,6 @@ for i, scene in enumerate(scenes_data):
         if last_successful_media and os.path.exists(last_successful_media["path"]):
             fallback_clip = VideoFileClip(last_successful_media["path"]).fx(vfx.loop, duration=scene_duration) if last_successful_media["type"] == "video" else ImageClip(last_successful_media["path"]).set_duration(scene_duration)
             
-            # FIX: Just crop to exact size and avoid the problematic PIL resize entirely
             z_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H).set_position(('center', 'center'))
             
             final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
