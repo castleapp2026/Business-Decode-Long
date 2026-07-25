@@ -16,9 +16,8 @@ chat_id = os.environ.get('CHAT_ID')
 pexels_key = os.environ.get('PEXELS_API_KEY')
 scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
 
-# 🚨 SECURITY FIX: Removed the hardcoded plaintext token. 
-# Make sure TELEGRAM_BOT_TOKEN is added to your GitHub Repository Secrets!
-bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+# Wapas apka hardcoded token daal diya hai
+bot_token = os.environ.get('TELEGRAM_BOT_TOKEN', '8970872207:AAEJOu4z1-9d6bziOKq3Q9d-mk0ZIhkevX4')
 
 video_title = os.environ.get('TITLE', 'Business Case Study')
 thumbnail_prompt = os.environ.get('THUMBNAIL_PROMPT', 'Cinematic business thumbnail')
@@ -33,8 +32,8 @@ print(f"Total Scenes to render: {len(scenes_data)}")
 
 def get_pexels_video(query):
     try:
-        # Added a short delay to protect against rate limits and 429 errors
-        time.sleep(1.5)
+        # Increased delay to 3 seconds to protect against rate limits and 429 errors
+        time.sleep(3.0)
         res = requests.get(f"https://api.pexels.com/videos/search?query={query}&per_page=15&orientation=landscape", headers={"Authorization": pexels_key}, timeout=15).json()
         if 'error' in res:
             print(f"Pexels API Error: {res['error']}")
@@ -131,11 +130,9 @@ for i, scene in enumerate(scenes_data):
         print(f"Visual Error at scene {i}: {e}")
         if last_successful_media and os.path.exists(last_successful_media["path"]):
             fallback_clip = VideoFileClip(last_successful_media["path"]).fx(vfx.loop, duration=scene_duration) if last_successful_media["type"] == "video" else ImageClip(last_successful_media["path"]).set_duration(scene_duration)
-            fallback_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H)
             
-            # Replaced float percentage with strict integer sizes to ensure Pillow doesn't crash on fractional pixels
-            zoom_w, zoom_h = int(TARGET_W * 1.02), int(TARGET_H * 1.02)
-            z_clip = fallback_clip.resize(newsize=(zoom_w, zoom_h)).set_position(('center', 'center'))
+            # FIX: Just crop to exact size and avoid the problematic PIL resize entirely
+            z_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H).set_position(('center', 'center'))
             
             final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
             final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
@@ -239,11 +236,8 @@ if not video_link:
 safe_description = str(video_desc).replace('\n', '  ')
 safe_title = str(video_title).replace('|', '')
 
-# 🚨 SECURITY FIX: Added check to prevent crash if bot_token is missing
 if not chat_id or chat_id == "None":
     print("❌ Error: CHAT_ID is missing. Cannot send Telegram message.")
-elif not bot_token:
-    print("❌ Error: TELEGRAM_BOT_TOKEN is missing. Please add it to your GitHub Secrets. Cannot send Telegram message.")
 else:
     message_text = f"READY_TO_UPLOAD|{video_link}|{safe_title}|{thumbnail_prompt}|{safe_description}"
     if len(message_text) > 4000: message_text = message_text[:3990] + "...[TRUNC]"
