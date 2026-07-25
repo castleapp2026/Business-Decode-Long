@@ -13,11 +13,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 👇 Upgraded to v4 to fix Node.js deprecation warnings
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # 👇 Upgraded to v5 to fix Node.js deprecation warnings
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -48,13 +50,22 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }} 
           # 👇 YEH LINE ADD KI GAYI HAI 👇
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 🚨 TELEGRAM BOT TOKEN BHI ADD KIYA HAI 🚨
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: python -u render_video.py  
 
-      # 👇 NAYA AUTO-DELETE BLOCK YAHAN HAI 👇
+      # 👇 NAYA AUTO-DELETE BLOCK YAHAN HAI (Native GitHub CLI use karke) 👇
       - name: Auto-delete older releases
-        uses: dev-drprasad/delete-older-releases@v0.3.3
-        with:
-          keep_latest: 3
-          delete_tags: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch all releases, keep the first 3, and delete the rest
+          releases=$(gh release list --repo ${{ github.repository }} | awk '{print $1}' | tail -n +4)
+          if [ -n "$releases" ]; then
+            for release in $releases; do
+              echo "Deleting old release: $release"
+              gh release delete "$release" --cleanup-tag -y --repo ${{ github.repository }}
+            done
+          else
+            echo "No older releases found to delete."
+          fi
