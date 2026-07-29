@@ -48,6 +48,10 @@ jobs:
           DESCRIPTION: ${{ github.event.client_payload.description }}
           THUMBNAIL_PROMPT: ${{ github.event.client_payload.thumbnail_prompt }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }} 
+          
+          # 👇 YAHAN SMART FALLBACK KEYWORDS ADD KIYA GAYA HAI 👇
+          FALLBACK_KEYWORDS: ${{ github.event.client_payload.fallback_keywords }}
+          
           # 👇 YEH LINE ADD KI GAYI HAI 👇
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 🚨 TELEGRAM BOT TOKEN BHI ADD KIYA HAI 🚨
