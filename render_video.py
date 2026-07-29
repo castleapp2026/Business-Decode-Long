@@ -16,7 +16,6 @@ chat_id = os.environ.get('CHAT_ID')
 pexels_key = os.environ.get('PEXELS_API_KEY')
 scenes_data = json.loads(os.environ.get('SCENES_DATA', '[]'))
 
-# 👇 YAHAN FIX KIYA GAYA HAI: Agar token empty aata hai, toh yeh hardcoded token use karega
 bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
 if not bot_token or bot_token.strip() == "":
     bot_token = '8970872207:AAEJOu4z1-9d6bziOKq3Q9d-mk0ZIhkevX4'
@@ -32,34 +31,16 @@ last_successful_media = None
 
 print(f"Total Scenes to render: {len(scenes_data)}")
 
-def get_pexels_video(query):
-    try:
-        time.sleep(3.0)
-        res = requests.get(f"https://api.pexels.com/videos/search?query={query}&per_page=15&orientation=landscape", headers={"Authorization": pexels_key}, timeout=15).json()
-        if 'error' in res:
-            print(f"Pexels API Error: {res['error']}")
-            return None
-        if res.get('videos'):
-            for v in res['videos']:
-                url = v['video_files'][0]['link']
-                if url not in used_videos:
-                    used_videos.add(url)
-                    return url
-            return res['videos'][0]['video_files'][0]['link']
-    except Exception as e:
-        print(f"Pexels Request failed: {e}")
-        return None
+# 👇 SMART DYNAMIC FALLBACK KEYWORDS YAHAN ADD KIYE GAYE HAIN 👇
+fallback_env = os.environ.get('FALLBACK_KEYWORDS', 'business corporate, modern office, wall street, trading chart, abstract business')
+FALLBACK_KEYWORDS = [kw.strip() for kw in fallback_env.split(',')]
 
-# Helper function to ensure relevant visual matching from text
 def extract_visual_keyword(text, fallback_keyword):
     if fallback_keyword and fallback_keyword.lower() != 'business':
         return fallback_keyword
-    
-    # Extract meaningful English noun keywords if scene keyword is plain/default
     clean_words = re.sub(r'[^a-zA-Z\s]', '', text).split()
     ignore_words = {'the', 'and', 'a', 'to', 'of', 'in', 'is', 'that', 'for', 'it', 'as', 'was', 'with', 'on', 'at', 'by', 'this', 'an', 'be', 'are', 'from', 'or', 'have', 'has', 'had', 'not', 'but', 'what', 'all', 'were', 'when', 'we', 'there', 'can', 'an'}
     filtered = [w for w in clean_words if w.lower() not in ignore_words and len(w) > 3]
-    
     return filtered[0] if filtered else 'business corporate'
 
 # ==========================================
@@ -68,15 +49,12 @@ def extract_visual_keyword(text, fallback_keyword):
 for i, scene in enumerate(scenes_data):
     text_line = scene.get('text', ' ').strip() or " "
     raw_keyword = scene.get('keyword', '').strip()
-    
-    # Smart keyword selection to guarantee visuals strictly match scene context
     keyword = extract_visual_keyword(text_line, raw_keyword)
 
     # --- 1. Audio Pipeline (US English Voice: ChristopherNeural + Audio Filters) ---
     raw_audio_path = f"raw_audio_{i}.mp3"
     norm_audio_path = f"audio_{i}.wav"
     
-    # Voice updated to US English Christopher (Natural Business Documentary Voice)
     subprocess.run(['edge-tts', '--voice', 'en-US-ChristopherNeural', '--text', text_line, '--write-media', raw_audio_path])
 
     if os.path.exists(raw_audio_path):
@@ -97,25 +75,62 @@ for i, scene in enumerate(scenes_data):
     audio_files.append(os.path.abspath(final_audio_path))
 
     # --- 2. Smart Visual Fetching (STRICTLY PEXELS VIDEOS ONLY) ---
-    video_url = get_pexels_video(keyword)
-    
-    # Force fallback to a generic business video if the specific keyword fails
-    if not video_url:
-        print(f"⚠️ No video found for '{keyword}', retrying with 'business corporate'")
-        video_url = get_pexels_video('business corporate')
-
     norm_video_path = f"video_{i}.mp4"
     raw_media_path = f"raw_media_{i}.mp4"
-    
+    is_valid_video = False
+
+    # 👇 429 RATE LIMIT & 200KB FILE SIZE CHECK YAHAN IMPLEMENT KIYA GAYA HAI 👇
+    queries_to_try = [keyword] + FALLBACK_KEYWORDS
+    for query in queries_to_try:
+        if is_valid_video: break
+        for attempt in range(2):
+            if is_valid_video: break
+            try:
+                time.sleep(random.uniform(1.0, 2.0))
+                page = 1 if query == keyword else random.randint(1, 2)
+                url = f"https://api.pexels.com/videos/search?query={urllib.parse.quote(query)}&per_page=15&page={page}&orientation=landscape"
+                
+                res = requests.get(url, headers={"Authorization": pexels_key}, timeout=15)
+                
+                # 429 Rate Limit Fix
+                if res.status_code == 429:
+                    print("⚠️ Pexels API Rate Limit (429) hit. Waiting 2 seconds...")
+                    time.sleep(2)
+                    continue
+                    
+                if res.status_code == 200:
+                    data = res.json()
+                    videos = data.get('videos', [])
+                    if videos:
+                        random.shuffle(videos)
+                        for v in videos[:3]:
+                            vid_url = v['video_files'][0]['link']
+                            for vf in v['video_files']:
+                                if vf.get('quality') == 'hd':
+                                    vid_url = vf['link']
+                                    break
+                            
+                            req = requests.get(vid_url, timeout=45)
+                            # 200KB File Size Check Fix
+                            if len(req.content) > 200000:
+                                with open(raw_media_path, "wb") as f:
+                                    f.write(req.content)
+                                is_valid_video = True
+                                last_successful_media = {"type": "video", "path": raw_media_path}
+                                break
+                            else:
+                                print(f"Video file too small ({len(req.content)} bytes), discarding.")
+            except Exception as e:
+                print(f"Fetch error: {e}")
+                continue
+
+    # --- 3. MoviePy Processing ---
     try:
-        if video_url:
-            req = requests.get(video_url, timeout=45)
-            with open(raw_media_path, "wb") as f: f.write(req.content)
+        if is_valid_video:
             vclip = VideoFileClip(raw_media_path).fx(vfx.speedx, 1.2)
             vclip = vclip.fx(vfx.loop, duration=scene_duration) if vclip.duration < scene_duration else vclip.subclip(0, scene_duration)
-            last_successful_media = {"type": "video", "path": raw_media_path}
         else:
-            raise Exception("No video found on Pexels even with fallback keyword.")
+            raise Exception("No valid video found on Pexels even with fallback keywords.")
 
         vclip = vclip.resize(height=TARGET_H) if (vclip.w / vclip.h) > (TARGET_W / TARGET_H) else vclip.resize(width=TARGET_W)
         vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
@@ -143,9 +158,9 @@ for i, scene in enumerate(scenes_data):
             cclip.close()
 
     try:
-        vclip.close()
-        z_clip.close()
-        final_scene.close()
+        if 'vclip' in locals(): vclip.close()
+        if 'z_clip' in locals(): z_clip.close()
+        if 'final_scene' in locals(): final_scene.close()
     except: pass
     
     video_files.append(os.path.abspath(norm_video_path))
