@@ -124,11 +124,12 @@ for i, scene in enumerate(scenes_data):
                 print(f"Fetch error: {e}")
                 continue
 
-    # --- 3. MoviePy Processing ---
+    # --- 3. MoviePy Processing (FIXED FOR BLACK FRAMES & MISSING VIDEO) ---
     try:
         if is_valid_video:
-            vclip = VideoFileClip(raw_media_path).fx(vfx.speedx, 1.2)
-            vclip = vclip.fx(vfx.loop, duration=scene_duration) if vclip.duration < scene_duration else vclip.subclip(0, scene_duration)
+            vclip = VideoFileClip(raw_media_path)
+            # Removed speedx to prevent duration mismatch/black screens
+            vclip = vclip.fx(vfx.loop, duration=scene_duration) if (vclip.duration is None or vclip.duration < scene_duration) else vclip.subclip(0, scene_duration)
         else:
             raise Exception("No valid video found on Pexels even with fallback keywords.")
 
@@ -137,25 +138,38 @@ for i, scene in enumerate(scenes_data):
         
         motion_type = random.choice(['zoom_in', 'zoom_out'])
         zoom_factor = 1.05 
-        z_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center')) if motion_type == 'zoom_in' else vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (t / scene_duration)).set_position(('center', 'center'))
+        # Clamped 't' with min() to avoid MoviePy out-of-bounds frame fetching which results in black scenes
+        z_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (min(t, scene_duration) / scene_duration)).set_position(('center', 'center')) if motion_type == 'zoom_in' else vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (min(t, scene_duration) / scene_duration)).set_position(('center', 'center'))
 
         final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
         final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
 
     except Exception as e:
         print(f"Visual Error at scene {i}: {e}")
+        fallback_success = False
+        
+        # Bulletproof Nested Try-Except to prevent any unhandled crashes
         if last_successful_media and os.path.exists(last_successful_media["path"]):
-            fallback_clip = VideoFileClip(last_successful_media["path"]).fx(vfx.loop, duration=scene_duration) if last_successful_media["type"] == "video" else ImageClip(last_successful_media["path"]).set_duration(scene_duration)
-            
-            z_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H).set_position(('center', 'center'))
-            
-            final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
-            final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
-            fallback_clip.close()
-        else:
-            cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration)
-            cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
-            cclip.close()
+            try:
+                fallback_clip = VideoFileClip(last_successful_media["path"])
+                fallback_clip = fallback_clip.fx(vfx.loop, duration=scene_duration) if (fallback_clip.duration is None or fallback_clip.duration < scene_duration) else fallback_clip.subclip(0, scene_duration)
+                
+                z_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H).set_position(('center', 'center'))
+                
+                final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(scene_duration)
+                final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
+                fallback_clip.close()
+                fallback_success = True
+            except Exception as fallback_e:
+                print(f"Fallback video failed: {fallback_e}")
+                
+        if not fallback_success:
+            try:
+                cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(scene_duration)
+                cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
+                cclip.close()
+            except:
+                pass
 
     try:
         if 'vclip' in locals(): vclip.close()
