@@ -26,7 +26,7 @@ video_desc = os.environ.get('DESCRIPTION', 'Business case study video.')
 
 TARGET_W, TARGET_H = 1920, 1080
 used_videos = set()
-video_files, audio_files = [], []
+video_files = [] # Ab yahan sirf .ts files save hongi
 last_successful_media = None  
 
 print(f"Total Scenes to render: {len(scenes_data)}")
@@ -71,9 +71,7 @@ for i, scene in enumerate(scenes_data):
         subprocess.run(['ffmpeg', '-y', '-i', norm_audio_path, '-i', 'whoosh.mp3', '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=0[aout]', '-map', '[aout]', '-ar', '44100', '-ac', '2', mixed_audio], check=True)
         final_audio_path = mixed_audio
 
-    audio_files.append(os.path.abspath(final_audio_path))
-
-    # ADD 0.15s BUFFER
+    # Visual buffer kept for safety, but TS muxing will cut it perfectly to audio length below
     visual_duration = scene_duration + 0.15
 
     # --- 2. Smart Visual Fetching ---
@@ -115,14 +113,12 @@ for i, scene in enumerate(scenes_data):
                                 with open(raw_media_path, "wb") as f:
                                     f.write(req.content)
                                 
-                                # VERIFICATION: Make sure file is not corrupt before MoviePy loads it
                                 try:
                                     subprocess.run(['ffprobe', '-v', 'error', raw_media_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                     is_valid_video = True
                                     last_successful_media = {"type": "video", "path": raw_media_path}
                                     break
                                 except Exception:
-                                    print("⚠️ Downloaded video corrupt. Trying another...")
                                     pass
             except Exception as e:
                 print(f"Fetch error: {e}")
@@ -160,8 +156,8 @@ for i, scene in enumerate(scenes_data):
                 final_scene.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
                 fallback_clip.close()
                 fallback_success = True
-            except Exception as fallback_e:
-                print(f"Fallback video failed: {fallback_e}")
+            except Exception:
+                pass
                 
         if not fallback_success:
             try:
@@ -176,41 +172,52 @@ for i, scene in enumerate(scenes_data):
         if 'final_scene' in locals(): final_scene.close()
     except: pass
     
-    video_files.append(os.path.abspath(norm_video_path))
+    # --- 4. 🔥 THE ULTIMATE TS MUXING FIX 🔥 ---
+    # Audio aur Video ko turant exact length me lock karke ek seamless .ts file bana rahe hain
+    scene_ts = f"scene_{i}.ts"
+    subprocess.run([
+        'ffmpeg', '-y', 
+        '-i', norm_video_path, 
+        '-i', final_audio_path, 
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k', 
+        '-shortest', # Yeh strictly video ko wahin cut karega jahan audio khatam ho rahi hai
+        '-bsf:v', 'h264_mp4toannexb', # Standardizes H264 into TS format (avoids corruption)
+        '-f', 'mpegts', 
+        scene_ts
+    ], check=True)
+    
+    video_files.append(os.path.abspath(scene_ts))
     gc.collect()
     print(f"Scene {i+1} Ready | Keyword: {keyword}")
 
 # ==========================================
-# DISK CONCATENATION (🔥 PTS BUG FIX APPLIED HERE 🔥)
+# DISK CONCATENATION (Seamless TS Appending)
 # ==========================================
-with open("vid_list.txt", "w") as f:
+with open("ts_list.txt", "w") as f:
     for vid in video_files: f.write(f"file '{vid}'\n")
 
-with open("aud_list.txt", "w") as f:
-    for aud in audio_files: f.write(f"file '{aud}'\n")
-
-# YAHAN FIX KIYA GAYA HAI: '-c copy' ki jagah video ko re-encode kiya gaya hai taaki timestamps completely continuous ho jayein
-subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-pix_fmt', 'yuv420p', 'merged_video.mp4'], check=True)
-# Audio ke liye bhi wav strict parameters enforce kiye gaye hain
-subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c:a', 'pcm_s16le', 'merged_audio.wav'], check=True)
+# MP4 concatenate karne se timestamps toot-te hain. .ts files completely ek saath lock ho jati hain.
+subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'ts_list.txt', '-c', 'copy', 'merged_video.ts'], check=True)
 
 # --- Final Master Mix (Grade + BGM Ducking + Logo Overlay) ---
 has_logo = os.path.exists("logo.png")
 has_bgm = os.path.exists("bgm.mp3")
 
-ffmpeg_cmd = ['ffmpeg', '-y', '-i', 'merged_video.mp4', '-i', 'merged_audio.wav']
+# Ab merged_video.ts me hi exact synced Audio [0:a] aur Video [0:v] dono hain!
+ffmpeg_cmd = ['ffmpeg', '-y', '-i', 'merged_video.ts']
 filter_complex = ""
 audio_map = ""
 video_map = ""
-inputs = 2
+input_index = 1 
 
 if has_bgm:
     ffmpeg_cmd.extend(['-stream_loop', '-1', '-i', 'bgm.mp3'])
-    filter_complex += "[1:a]asplit=2[voice_main][voice_control]; [2:a]volume=0.45[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
+    filter_complex += f"[0:a]asplit=2[voice_main][voice_control]; [{input_index}:a]volume=0.45[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
-    inputs += 1
+    input_index += 1
 else:
-    filter_complex += "[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
+    filter_complex += "[0:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
 
 channel_name = "Business Decode®"
@@ -219,7 +226,7 @@ current_v_map = "[v_graded]"
 
 if has_logo:
     ffmpeg_cmd.extend(['-i', 'logo.png'])
-    filter_complex += f"[{inputs-1}:v]format=rgba,colorchannelmixer=aa=0.85,scale=200:-1[logo]; {current_v_map}[logo]overlay=W-w-40:40[v_out]"
+    filter_complex += f"[{input_index}:v]format=rgba,colorchannelmixer=aa=0.85,scale=200:-1[logo]; {current_v_map}[logo]overlay=W-w-40:40[v_out]"
     video_map = "[v_out]"
 else:
     video_map = current_v_map
