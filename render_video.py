@@ -73,7 +73,7 @@ for i, scene in enumerate(scenes_data):
 
     audio_files.append(os.path.abspath(final_audio_path))
 
-    # ADD 0.15s BUFFER: Har video clip audio se 0.15s lambi hogi, taaki video kabhi pehle khatam na ho (Fixes end black screen)
+    # ADD 0.15s BUFFER
     visual_duration = scene_duration + 0.15
 
     # --- 2. Smart Visual Fetching ---
@@ -181,7 +181,7 @@ for i, scene in enumerate(scenes_data):
     print(f"Scene {i+1} Ready | Keyword: {keyword}")
 
 # ==========================================
-# DISK CONCATENATION (Separate Audio & Video for zero Timestamp Bugs)
+# DISK CONCATENATION (🔥 PTS BUG FIX APPLIED HERE 🔥)
 # ==========================================
 with open("vid_list.txt", "w") as f:
     for vid in video_files: f.write(f"file '{vid}'\n")
@@ -189,8 +189,10 @@ with open("vid_list.txt", "w") as f:
 with open("aud_list.txt", "w") as f:
     for aud in audio_files: f.write(f"file '{aud}'\n")
 
-subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
-subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
+# YAHAN FIX KIYA GAYA HAI: '-c copy' ki jagah video ko re-encode kiya gaya hai taaki timestamps completely continuous ho jayein
+subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-pix_fmt', 'yuv420p', 'merged_video.mp4'], check=True)
+# Audio ke liye bhi wav strict parameters enforce kiye gaye hain
+subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c:a', 'pcm_s16le', 'merged_audio.wav'], check=True)
 
 # --- Final Master Mix (Grade + BGM Ducking + Logo Overlay) ---
 has_logo = os.path.exists("logo.png")
@@ -225,7 +227,6 @@ else:
 if filter_complex.endswith("; "): filter_complex = filter_complex[:-2]
 if filter_complex: ffmpeg_cmd.extend(['-filter_complex', filter_complex])
 
-# -shortest trims the extra visual buffer exactly to the audio length!
 ffmpeg_cmd.extend([
     '-map', video_map, '-map', audio_map,
     '-c:v', 'libx264', '-preset', 'fast', '-profile:v', 'high', '-bf', '2', '-g', '48', '-crf', '26', '-pix_fmt', 'yuv420p',
