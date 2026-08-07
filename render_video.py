@@ -25,12 +25,12 @@ thumbnail_prompt = os.environ.get('THUMBNAIL_PROMPT', 'Cinematic business thumbn
 video_desc = os.environ.get('DESCRIPTION', 'Business case study video.')
 
 TARGET_W, TARGET_H = 1920, 1080
-video_files = []
+used_videos = set()
+video_files, audio_files = [], []
 last_successful_media = None  
 
 print(f"Total Scenes to render: {len(scenes_data)}")
 
-# SMART DYNAMIC FALLBACK KEYWORDS YAHAN ADD KIYE GAYE HAIN
 fallback_env = os.environ.get('FALLBACK_KEYWORDS', 'business corporate, modern office, wall street, trading chart, abstract business')
 FALLBACK_KEYWORDS = [kw.strip() for kw in fallback_env.split(',')]
 
@@ -50,7 +50,7 @@ for i, scene in enumerate(scenes_data):
     raw_keyword = scene.get('keyword', '').strip()
     keyword = extract_visual_keyword(text_line, raw_keyword)
 
-    # --- 1. Audio Pipeline (US English Voice: ChristopherNeural + Audio Filters) ---
+    # --- 1. Audio Pipeline ---
     raw_audio_path = f"raw_audio_{i}.mp3"
     norm_audio_path = f"audio_{i}.wav"
     
@@ -71,11 +71,13 @@ for i, scene in enumerate(scenes_data):
         subprocess.run(['ffmpeg', '-y', '-i', norm_audio_path, '-i', 'whoosh.mp3', '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=0[aout]', '-map', '[aout]', '-ar', '44100', '-ac', '2', mixed_audio], check=True)
         final_audio_path = mixed_audio
 
-    # Add 150ms buffer to visual rendering so video length NEVER falls short of audio duration (Avoids black screens)
+    audio_files.append(os.path.abspath(final_audio_path))
+
+    # ADD 0.15s BUFFER: Har video clip audio se 0.15s lambi hogi, taaki video kabhi pehle khatam na ho (Fixes end black screen)
     visual_duration = scene_duration + 0.15
 
-    # --- 2. Smart Visual Fetching (STRICTLY PEXELS VIDEOS ONLY) ---
-    norm_video_path = f"raw_vid_{i}.mp4"
+    # --- 2. Smart Visual Fetching ---
+    norm_video_path = f"video_{i}.mp4"
     raw_media_path = f"raw_media_{i}.mp4"
     is_valid_video = False
 
@@ -92,7 +94,7 @@ for i, scene in enumerate(scenes_data):
                 res = requests.get(url, headers={"Authorization": pexels_key}, timeout=15)
                 
                 if res.status_code == 429:
-                    print("⚠️ Pexels API Rate Limit (429) hit. Waiting 2 seconds...")
+                    print("⚠️ Rate Limit hit. Waiting 2s...")
                     time.sleep(2)
                     continue
                     
@@ -109,34 +111,36 @@ for i, scene in enumerate(scenes_data):
                                     break
                             
                             req = requests.get(vid_url, timeout=45)
-                            # Size reduced to 50KB to catch shorter proxy clips without rejecting valid assets
                             if len(req.content) > 50000:
                                 with open(raw_media_path, "wb") as f:
                                     f.write(req.content)
-                                is_valid_video = True
-                                last_successful_media = {"type": "video", "path": raw_media_path}
-                                break
-                            else:
-                                print(f"Video file too small ({len(req.content)} bytes), discarding.")
+                                
+                                # VERIFICATION: Make sure file is not corrupt before MoviePy loads it
+                                try:
+                                    subprocess.run(['ffprobe', '-v', 'error', raw_media_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                    is_valid_video = True
+                                    last_successful_media = {"type": "video", "path": raw_media_path}
+                                    break
+                                except Exception:
+                                    print("⚠️ Downloaded video corrupt. Trying another...")
+                                    pass
             except Exception as e:
                 print(f"Fetch error: {e}")
                 continue
 
-    # --- 3. MoviePy Processing (FIXED FOR BLACK FRAMES & AUDIO CRASHES) ---
+    # --- 3. MoviePy Processing ---
     try:
         if is_valid_video:
-            # audio=False completely avoids MoviePy audio-codec freezing issues
-            vclip = VideoFileClip(raw_media_path, audio=False) 
+            vclip = VideoFileClip(raw_media_path, audio=False)
             vclip = vclip.fx(vfx.loop, duration=visual_duration) if (vclip.duration is None or vclip.duration < visual_duration) else vclip.subclip(0, visual_duration)
         else:
-            raise Exception("No valid video found on Pexels even with fallback keywords.")
+            raise Exception("No valid video found.")
 
         vclip = vclip.resize(height=TARGET_H) if (vclip.w / vclip.h) > (TARGET_W / TARGET_H) else vclip.resize(width=TARGET_W)
         vclip = vclip.crop(x_center=vclip.w/2, y_center=vclip.h/2, width=TARGET_W, height=TARGET_H)
         
         motion_type = random.choice(['zoom_in', 'zoom_out'])
         zoom_factor = 1.05 
-        
         z_clip = vclip.resize(lambda t: 1.0 + (zoom_factor - 1.0) * (min(t, visual_duration) / visual_duration)).set_position(('center', 'center')) if motion_type == 'zoom_in' else vclip.resize(lambda t: zoom_factor - (zoom_factor - 1.0) * (min(t, visual_duration) / visual_duration)).set_position(('center', 'center'))
 
         final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(visual_duration)
@@ -150,7 +154,6 @@ for i, scene in enumerate(scenes_data):
             try:
                 fallback_clip = VideoFileClip(last_successful_media["path"], audio=False)
                 fallback_clip = fallback_clip.fx(vfx.loop, duration=visual_duration) if (fallback_clip.duration is None or fallback_clip.duration < visual_duration) else fallback_clip.subclip(0, visual_duration)
-                
                 z_clip = fallback_clip.resize(height=TARGET_H).crop(x_center=fallback_clip.w/2, y_center=fallback_clip.h/2, width=TARGET_W, height=TARGET_H).set_position(('center', 'center'))
                 
                 final_scene = CompositeVideoClip([z_clip], size=(TARGET_W, TARGET_H)).set_duration(visual_duration)
@@ -165,8 +168,7 @@ for i, scene in enumerate(scenes_data):
                 cclip = ColorClip(size=(TARGET_W, TARGET_H), color=(30, 30, 30)).set_duration(visual_duration)
                 cclip.write_videofile(norm_video_path, fps=24, codec="libx264", audio=False, preset="ultrafast", ffmpeg_params=['-pix_fmt', 'yuv420p', '-vf', 'setsar=1'], logger=None)
                 cclip.close()
-            except:
-                pass
+            except: pass
 
     try:
         if 'vclip' in locals(): vclip.close()
@@ -174,60 +176,56 @@ for i, scene in enumerate(scenes_data):
         if 'final_scene' in locals(): final_scene.close()
     except: pass
     
-    # --- 4. Hard Mux Syncing (Guarantees Perfect Audio/Video Alignment) ---
-    scene_mp4 = f"scene_{i}.mp4"
-    # Merges the Video & Audio precisely using -shortest. The visual_duration buffer ensures the video never ends early.
-    subprocess.run(['ffmpeg', '-y', '-i', norm_video_path, '-i', final_audio_path, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-shortest', scene_mp4], check=True)
-    
-    video_files.append(os.path.abspath(scene_mp4))
+    video_files.append(os.path.abspath(norm_video_path))
     gc.collect()
     print(f"Scene {i+1} Ready | Keyword: {keyword}")
 
 # ==========================================
-# DISK CONCATENATION (Merged directly for zero lag)
+# DISK CONCATENATION (Separate Audio & Video for zero Timestamp Bugs)
 # ==========================================
 with open("vid_list.txt", "w") as f:
     for vid in video_files: f.write(f"file '{vid}'\n")
 
-# Yahan single concatenation hoti hai audio-included scenes par taaki Out-of-sync bugs na aayein
+with open("aud_list.txt", "w") as f:
+    for aud in audio_files: f.write(f"file '{aud}'\n")
+
 subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'vid_list.txt', '-c', 'copy', 'merged_video.mp4'], check=True)
+subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'aud_list.txt', '-c', 'copy', 'merged_audio.wav'], check=True)
 
 # --- Final Master Mix (Grade + BGM Ducking + Logo Overlay) ---
 has_logo = os.path.exists("logo.png")
 has_bgm = os.path.exists("bgm.mp3")
 
-ffmpeg_cmd = ['ffmpeg', '-y', '-i', 'merged_video.mp4']
+ffmpeg_cmd = ['ffmpeg', '-y', '-i', 'merged_video.mp4', '-i', 'merged_audio.wav']
 filter_complex = ""
 audio_map = ""
 video_map = ""
-input_index = 1 # Tracks dynamic input indexing
+inputs = 2
 
 if has_bgm:
     ffmpeg_cmd.extend(['-stream_loop', '-1', '-i', 'bgm.mp3'])
-    # 0:a is the TTS track encoded in merged_video.mp4. Dynamically target inputs.
-    filter_complex += f"[0:a]asplit=2[voice_main][voice_control]; [{input_index}:a]volume=0.45[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
+    filter_complex += "[1:a]asplit=2[voice_main][voice_control]; [2:a]volume=0.45[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
-    input_index += 1
+    inputs += 1
 else:
-    filter_complex += "[0:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
+    filter_complex += "[1:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
 
-# Channel Name for Watermark
 channel_name = "Business Decode®"
 filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=H-th-50[v_graded]; "
 current_v_map = "[v_graded]"
 
 if has_logo:
     ffmpeg_cmd.extend(['-i', 'logo.png'])
-    filter_complex += f"[{input_index}:v]format=rgba,colorchannelmixer=aa=0.85,scale=200:-1[logo]; {current_v_map}[logo]overlay=W-w-40:40[v_out]"
+    filter_complex += f"[{inputs-1}:v]format=rgba,colorchannelmixer=aa=0.85,scale=200:-1[logo]; {current_v_map}[logo]overlay=W-w-40:40[v_out]"
     video_map = "[v_out]"
-    input_index += 1
 else:
     video_map = current_v_map
 
 if filter_complex.endswith("; "): filter_complex = filter_complex[:-2]
 if filter_complex: ffmpeg_cmd.extend(['-filter_complex', filter_complex])
 
+# -shortest trims the extra visual buffer exactly to the audio length!
 ffmpeg_cmd.extend([
     '-map', video_map, '-map', audio_map,
     '-c:v', 'libx264', '-preset', 'fast', '-profile:v', 'high', '-bf', '2', '-g', '48', '-crf', '26', '-pix_fmt', 'yuv420p',
