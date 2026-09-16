@@ -220,8 +220,9 @@ else:
     filter_complex += "[0:a]loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
 
-channel_name = "Business Decode®"
-filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=H-th-50[v_graded]; "
+channel_name = "BD®"
+# 👇 Yahan y=H-th-50 se y=50 kiya gaya hai taaki watermark top-right corner mein aaye 👇
+filter_complex += f"[0:v]eq=contrast=1.05:saturation=1.15,vignette,noise=alls=1:allf=t+u,drawtext=text='{channel_name}':fontcolor=white@0.5:fontsize=45:x=W-tw-50:y=50[v_graded]; "
 current_v_map = "[v_graded]"
 
 if has_logo:
