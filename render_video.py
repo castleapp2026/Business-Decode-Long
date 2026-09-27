@@ -213,7 +213,7 @@ input_index = 1
 
 if has_bgm:
     ffmpeg_cmd.extend(['-stream_loop', '-1', '-i', 'bgm.mp3'])
-    filter_complex += f"[0:a]asplit=2[voice_main][voice_control]; [{input_index}:a]volume=0.45[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
+    filter_complex += f"[0:a]asplit=2[voice_main][voice_control]; [{input_index}:a]volume=0.17[bgm_low]; [bgm_low][voice_control]sidechaincompress=threshold=0.08:ratio=8:attack=200:release=1000[ducked_bgm]; [voice_main][ducked_bgm]amix=inputs=2:duration=first,loudnorm=I=-14:LRA=11:TP=-1.5[a_out]; "
     audio_map = "[a_out]"
     input_index += 1
 else:
